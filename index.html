@@ -49,6 +49,15 @@ footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-
 .sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
 .sisternav a:hover{border-bottom-color:#0a58ca}
 </style>
+<style>
+.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
+.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
+ color:#5b6270;margin:0 0 .6rem}
+.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
+.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
+.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
+.sisternav a:hover{border-bottom-color:#0a58ca}
+</style>
 </head>
 <body>
 <main>
@@ -72,9 +81,9 @@ the snippet at the end</p>
 <h2>The setup: matched size, not matched quality</h2>
 
 <p>Comparing encoders at "quality 80" is meaningless, because the three quality scales are not the
-same scale. Pillow's <code>quality=80</code> for JPEG, WebP and AVIF produce files that differ by a
+same scale. Pillow's <code>quality=80</code> for JPEG, WebP and <a href="https://celticgemini001.github.io/upgolab-jpeg-blocking-upscale/">AVIF</a> produce files that differ by a
 factor of two in size on identical pixels. What a person actually chooses is a <strong>file size
-budget</strong> — a hero image that must stay under half a megabyte, a thumbnail under 60 KB — and
+budget</strong> — a hero image that must stay under half a megabyte, a <a href="https://celticgemini001.github.io/upgolab-thumbnail-4k-master/">thumbnail</a> under 60 KB — and
 then asks which encoder uses that budget best.</p>
 
 <p>So the comparison below searches each encoder's quality scale for the setting that lands closest
@@ -451,7 +460,7 @@ number above is the wrong tool. On this frame:</p>
 <p>WebP lossless is 71.9% of the PNG size on a photographic frame, which is a legitimate saving with
 zero quality argument attached. But both are about 7.7× the JPEG size. Lossless is for intermediates,
 not for delivery, and the only reason to mention it in a page about output format is that the
-intermediate choice is where generation loss is either avoided or invited in.</p>
+intermediate choice is where <a href="https://celticgemini001.github.io/upgolab-chroma-subsampling/">generation loss</a> is either avoided or invited in.</p>
 
 <h2>The decision, reduced to what was measured</h2>
 
@@ -528,6 +537,8 @@ setting and the frame — q85 on this source took 29 — so treat "29" as an ord
 constant. The <em>existence</em> of the fixed point is the reusable finding, and that one is a property
 of DCT quantisation rather than of this photograph.</p>
 
+
+</article>
 <footer>
 <p>Published by UpgoLAB — sharpening and upscaling for photos and short video in the browser, where
 the output format is one of the few settings that costs nothing to change: try the
@@ -539,16 +550,6 @@ energy; measuring after a downscale halves the format penalty; the luma drop on 
 belongs to the encoder, not the subsampling; and the 4:2:0 byte saving does not depend on how much
 chroma detail is left) and no value adjusted after the run. The reference for every PSNR is the
 pre-encode array, never a re-decoded file.</p>
-
-<style>
-.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
-.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
- color:#5b6270;margin:0 0 .6rem}
-.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
-.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
-.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
-.sisternav a:hover{border-bottom-color:#0a58ca}
-</style>
 
 <nav class="sisternav" aria-label="More measured upscaling guides">
 <p>More measured guides</p>
@@ -581,7 +582,6 @@ pre-encode array, never a re-decoded file.</p>
 </ul>
 </nav>
 </footer>
-</article>
 </main>
 </body>
 </html>
