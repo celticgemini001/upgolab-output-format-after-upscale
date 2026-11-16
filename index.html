@@ -166,6 +166,185 @@ fringe along the edge comes from.</p>
 chroma detail that never existed and 4:2:0 output discards it again for an 18.6% saving. If the
 source was 4:4:4 or synthetic, that saving is a real loss.</p>
 
+<h2>What a second 4:2:0 pass costs when the source was already 4:2:0</h2>
+
+<p>Everything above assumed a full-resolution chroma source. Most photos that reach an upscaler
+do not have one: they were JPEGs at 4:2:0, or frames pulled out of video at 4:2:0. So the common
+pipeline is not <code>4:4:4 → upscale → encode</code>. It is
+<code>4:2:0 → upscale → 4:2:0</code>, and the chroma gets thrown away twice. I measured both passes
+separately instead of assuming the second one is free.</p>
+
+<h3>Step one: the pure arithmetic, no codec involved</h3>
+
+<p>Take the 2× lanczos reference, subsample Cb the way 4:2:0 does (keep one sample in four, box
+filter down, bilinear back up), then do it again to the result. Two passes, no JPEG anywhere, so
+nothing but the subsampling can move the number:</p>
+
+<table>
+<thead><tr><th>Image</th><th>1st pass RMSE</th><th>2nd pass RMSE</th><th>Total vs original</th><th>2nd ÷ 1st</th></tr></thead>
+<tbody>
+<tr><td>clear-reality</td><td class="num">0.532</td><td class="num">0.323</td><td class="num">0.752</td><td class="num">0.61</td></tr>
+<tr><td>cinema-vivid</td><td class="num">0.667</td><td class="num">0.462</td><td class="num">0.994</td><td class="num">0.69</td></tr>
+<tr><td>natural-hd</td><td class="num">0.534</td><td class="num">0.347</td><td class="num">0.778</td><td class="num">0.65</td></tr>
+<tr><td>true-texture</td><td class="num">0.481</td><td class="num">0.281</td><td class="num">0.678</td><td class="num">0.58</td></tr>
+<tr><td>ultra-crisp</td><td class="num">0.547</td><td class="num">0.361</td><td class="num">0.804</td><td class="num">0.66</td></tr>
+<tr><td><strong>median</strong></td><td class="num"><strong>0.534</strong></td><td class="num"><strong>0.347</strong></td><td class="num"><strong>0.778</strong></td><td class="num"><strong>0.65</strong></td></tr>
+</tbody>
+</table>
+
+<p>The hypothesis I started with was that the second pass would cost the same as the first — that
+subsampling is a per-generation tax. It does not. The second pass costs a median 0.65× the first,
+in all five images, because the first pass already removed the chroma detail the second pass would
+have destroyed. What is left to lose is a smooth plane, and smoothing a smooth plane is cheap.</p>
+
+<p>That is not a reprieve, only a smaller bill. The two errors do not cancel and they do not overlap:
+in quadrature the total is 0.778 against a first-pass 0.534, so the pipeline is 46% worse on chroma
+than a single pass would be. Sub-additive, not free.</p>
+
+<h3>Step two: the same thing with a JPEG at the end</h3>
+
+<p>Now the real question — is any of that visible once the file is actually encoded? Four chains, all
+encoded at q85 <em>with 4:4:4 forced</em> so the encoder contributes the same amount to every row and
+the only variable is where the chroma was lost. Reference is the 2× 4:4:4 array; 5 images; medians:</p>
+
+<table>
+<thead><tr><th>Chain</th><th>Bytes</th><th>Luma PSNR</th><th>Chroma RMSE</th><th>vs 4:4:4</th></tr></thead>
+<tbody>
+<tr><td>4:4:4 all the way</td><td class="num">711,558</td><td class="num">48.263 dB</td><td class="num">0.571</td><td class="num">—</td></tr>
+<tr><td>4:2:0 at encode only</td><td class="num">702,844</td><td class="num">47.594 dB</td><td class="num">0.614</td><td class="num">+7.5%</td></tr>
+<tr><td>4:2:0 at source only</td><td class="num">693,958</td><td class="num">47.583 dB</td><td class="num">0.785</td><td class="num">+37.5%</td></tr>
+<tr><td>4:2:0 at both ends</td><td class="num">694,498</td><td class="num">47.576 dB</td><td class="num">0.978</td><td class="num">+71.3%</td></tr>
+</tbody>
+</table>
+
+<p>Two things worth flagging. The chroma damage compounds roughly in proportion to how many times the
+resolution is cut — 0.571 → 0.614 → 0.785 → 0.978 is +7.5%, +37.5%, +71.3% — but the <em>source</em> pass costs five times what the <em>encode</em>
+pass costs, which is the opposite of what a pipeline diagram suggests. Losing chroma before the
+upscale is expensive because the upscale then has to invent chroma from a quarter-resolution plane
+and smooths it across edges; losing it at the end is cheap because the upscaler had real chroma to
+work with and only the final delivery throws it away.</p>
+
+<p>The second thing is the luma column, and it is a negative result about my own method. Luma PSNR
+falls 0.67 dB on all three subsampled chains, including the one where chroma was only touched at the
+last step. Luma is untouched by 4:2:0 by definition, so that drop cannot be a chroma effect. Isolating
+it: chroma-subsample → RGB → YCbCr before any encode costs a luma RMSE of 0.086, against a JPEG q85
+floor of 0.987. So 99% of the measured luma loss is the encoder, not the chain — but the honest
+reading is that these 0.67 dB are not attributable to the chroma pass at all, and the small remainder
+comes from the encoder re-allocating bits around the extra clipping (3.83% of pixels clipped, against
+2.84% on the clean chain). Reporting the luma column as if subsampling caused it would be wrong.</p>
+
+<h3>The penalty grows with the scale factor</h3>
+
+<p>If the mechanism is "the upscale has to invent chroma it never had", the damage should scale with
+how much inventing is required. It does, slowly. Chroma error of the double-subsampled chain divided
+by the single-pass chain, median of five images:</p>
+
+<table>
+<thead><tr><th>Scale factor</th><th>One pass</th><th>Two passes</th><th>Ratio</th></tr></thead>
+<tbody>
+<tr><td>2×</td><td class="num">0.614</td><td class="num">0.978</td><td class="num">1.59×</td></tr>
+<tr><td>3×</td><td class="num">0.517</td><td class="num">0.843</td><td class="num">1.63×</td></tr>
+<tr><td>4×</td><td class="num">0.452</td><td class="num">0.773</td><td class="num">1.72×</td></tr>
+</tbody>
+</table>
+
+<p>Both absolute numbers fall with the factor — more upscale means more smoothing, and a smoother
+image is easier to subsample — but the ratio climbs from 1.59× to 1.72×. The gap widens at exactly
+the scales where people upscale furthest. It is not a dramatic effect, and at 4× the difference is
+0.32 RMSE units on a 0–255 scale, which nobody will see on a photograph. Where it will show is a
+saturated edge, and that is measurable: the 99th-percentile chroma error on the top-5%-gradient mask
+went from a median 4.0 (4:4:4) to 6.0 (encode only), 11.0 (source only) and 17.0 (both) — 4.25× the
+clean chain at the pixels where chroma error is most visible.</p>
+
+<h3>A fourth negative result: the 20% saving does not depend on chroma detail</h3>
+
+<p>The reason 4:2:0 is offered as an export option is that it is ~20% smaller. I expected that saving
+to shrink on an already-subsampled source, since there is nothing left in the chroma to drop. It does
+not shrink at all:</p>
+
+<table>
+<thead><tr><th>Source</th><th>4:4:4 bytes</th><th>4:2:0 bytes</th><th>Saving</th></tr></thead>
+<tbody>
+<tr><td>full-resolution chroma</td><td class="num">745,940</td><td class="num">599,683</td><td class="num">19.6%</td></tr>
+<tr><td>already 4:2:0</td><td class="num">731,212</td><td class="num">594,507</td><td class="num">18.7%</td></tr>
+<tr><td colspan="3"><em>median over 5 images</em></td><td class="num">21.27% → 20.18%</td></tr>
+</tbody>
+</table>
+
+<p>The saving is 20.18% instead of 21.27% — a one-point difference across five images and four quality
+levels. So the 20% is not buying the removal of chroma <em>detail</em>, which is already gone; it is
+buying the removal of chroma <em>resolution</em>, which is a fixed 3/4 of the chroma samples no matter
+how smooth they are. The practical consequence: you cannot argue "my source was already 4:2:0, so
+4:2:0 output costs me nothing" and you also cannot argue "so it saves me less". It saves the same and
+costs more, because it is the second dose.</p>
+
+<p>And if the byte budget is what is actually fixed, the choice is not binary. Encoding the same
+2× frame as 4:4:4 at a <em>lower</em> quality — q76–77, chosen by bisection to match the 4:2:0 file's
+byte count — beat the 4:2:0 export on chroma error in <strong>5 of 5</strong> images: median chroma
+RMSE 0.656 against 1.129, a 41.9% reduction, for a luma cost of 0.625 dB (47.553 → 46.928 dB). Quality
+knobs spend bytes where the encoder thinks they matter; subsampling spends them on a fixed geometric
+assumption instead. On a photographic frame that is not upscaled — 4:2:0 is still the better trade at
+these numbers, since 0.6 dB of luma is worth more than 0.47 RMSE of chroma. It is specifically on the
+<em>second</em> pass, where chroma has already been halved once, that paying in quality rather than in
+chroma resolution starts to win.</p>
+
+<h3>Reproducing it</h3>
+
+<p>The whole measurement is one script, and it hides one trap that produced a wrong number on the first
+run. Pillow's <code>YCbCr</code> mode keeps Cb and Cr as signed values around zero, so if you hand a
+raw Cb plane to <code>Image.fromarray()</code> as <code>'L'</code> every negative sample wraps to 255
+and the box filter averages garbage — the first pass reported a chroma RMSE of 8.4 and a nonsense
++1218% before the cause was found. Chroma has to be offset by 128, exactly the way JPEG stores it:</p>
+
+<pre><code>import io, numpy as np
+from PIL import Image
+
+M  = np.array([[ .299, .587, .114],          # BT.601 forward
+               [-.168736, -.331264, .5],
+               [ .5, -.418688, -.081312]])
+Mi = np.linalg.inv(M)
+
+rgb2ycc = lambda a: a @ M.T                   # float RGB 0-255 -> Y,Cb,Cr (Cb/Cr signed)
+ycc2rgb = lambda p: np.clip(p @ Mi.T, 0, 255)
+
+_u = lambda p: np.clip(np.rint(p + 128), 0, 255).astype(np.uint8)   # chroma, JPEG-style
+_b = lambda u: u.astype(np.float64) - 128
+
+def sub420(p):                                # keep 1 of every 4 chroma samples
+    h, w = p.shape
+    return _b(np.asarray(Image.fromarray(_u(p), 'L')
+                         .resize((w//2, h//2), Image.BOX)).astype(np.float64))
+
+def back(p, w, h):                            # bilinear back to full size
+    return _b(np.asarray(Image.fromarray(_u(p), 'L')
+                         .resize((w, h), Image.BILINEAR)).astype(np.float64))
+
+def upscale(a8, f=2):
+    return np.asarray(Image.fromarray(a8, 'RGB')
+                      .resize((a8.shape[1]*f, a8.shape[0]*f), Image.LANCZOS))
+
+C  = rgb2ycc(upscale(src).astype(np.float64))        # 2x 4:4:4 reference
+S  = rgb2ycc(src.astype(np.float64))                 # the 4:2:0 original
+h, w = C.shape[:2]
+
+# chroma lost before the upscale, then lost again at the end
+cb = back(sub420(back(sub420(S[...,1]), w, h)), w, h)
+cr = back(sub420(back(sub420(S[...,2]), w, h)), w, h)
+pipeline = ycc2rgb(np.dstack([C[...,0], cb, cr])).astype(np.uint8)
+
+buf = io.BytesIO()
+Image.fromarray(pipeline, 'RGB').save(buf, 'JPEG', quality=85, subsampling=2)
+decoded = np.asarray(Image.open(io.BytesIO(buf.getvalue())).convert('RGB'))</code></pre>
+
+<p>Output on this machine, medians over five photographs at 1080×1620 upscaled 2×, all encodes forced
+to 4:4:4 so the encoder is not a variable: chroma RMSE <code>0.571 → 0.614 → 0.785 → 0.978</code> for
+444 / 420-encode / 420-source / 420-both, luma <code>48.263 → 47.594 → 47.583 → 47.576</code> dB.
+The gap between 0.614 and 0.978 is the price of the first subsampling pass, and it is paid before the
+upscale, where it is five times more expensive than at the end. Which is the one ordering rule this
+experiment supports: if a 4:2:0 source has to pass through an upscale, the subsampling has already
+happened — do not do it again on the way out if you can afford 4:4:4, and if you cannot, spend the
+saving on quality instead.</p>
+
 <h2>Generation loss: JPEG has a fixed point, the modern codecs do not</h2>
 
 <p>Files get re-encoded. A CMS resizes, a CDN recompresses, a client opens and saves. So I re-encoded
@@ -348,9 +527,12 @@ of DCT quantisation rather than of this photograph.</p>
 the output format is one of the few settings that costs nothing to change: try the
 <a href="https://upgolab.com">browser upscaler and pick the export format yourself</a>.</p>
 <p>Measured with numpy 1.26.4 and Pillow 12.2.0 on one real photograph at 1080×1620 upscaled 2× to
-2160×3240; 7 tables, 7 experiments, 2 negative results reported as measured (all encoders add
-high-frequency energy; measuring after a downscale halves the format penalty) and no value adjusted
-after the run. The reference for every PSNR is the pre-encode array, never a re-decoded file.</p>
+2160×3240, with the chroma-pipeline section repeated across five photographs from the same shoot;
+11 tables, 11 experiments, 4 negative results reported as measured (all encoders add high-frequency
+energy; measuring after a downscale halves the format penalty; the luma drop on the 4:2:0 chains
+belongs to the encoder, not the subsampling; and the 4:2:0 byte saving does not depend on how much
+chroma detail is left) and no value adjusted after the run. The reference for every PSNR is the
+pre-encode array, never a re-decoded file.</p>
 
 <style>
 .sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
