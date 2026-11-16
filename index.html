@@ -197,9 +197,11 @@ subsampling is a per-generation tax. It does not. The second pass costs a median
 in all five images, because the first pass already removed the chroma detail the second pass would
 have destroyed. What is left to lose is a smooth plane, and smoothing a smooth plane is cheap.</p>
 
-<p>That is not a reprieve, only a smaller bill. The two errors do not cancel and they do not overlap:
-in quadrature the total is 0.778 against a first-pass 0.534, so the pipeline is 46% worse on chroma
-than a single pass would be. Sub-additive, not free.</p>
+<p>That is not a reprieve, only a smaller bill. The two errors are correlated (r = 0.50 on Cb, not
+independent), which is why they do not add in quadrature: 0.534² + 0.347² would predict 0.637, and
+the measured total is 0.778 — 46% worse than a single pass, and 22% worse than independence would
+suggest. The second pass damages the same neighbourhoods the first one already damaged, and the
+damage compounds rather than accumulating independently.</p>
 
 <h3>Step two: the same thing with a JPEG at the end</h3>
 
@@ -225,13 +227,14 @@ and smooths it across edges; losing it at the end is cheap because the upscaler 
 work with and only the final delivery throws it away.</p>
 
 <p>The second thing is the luma column, and it is a negative result about my own method. Luma PSNR
-falls 0.67 dB on all three subsampled chains, including the one where chroma was only touched at the
+falls ~0.67 dB on all three subsampled chains, including the one where chroma was only touched at the
 last step. Luma is untouched by 4:2:0 by definition, so that drop cannot be a chroma effect. Isolating
 it: chroma-subsample → RGB → YCbCr before any encode costs a luma RMSE of 0.086, against a JPEG q85
-floor of 0.987. So 99% of the measured luma loss is the encoder, not the chain — but the honest
-reading is that these 0.67 dB are not attributable to the chroma pass at all, and the small remainder
-comes from the encoder re-allocating bits around the extra clipping (3.83% of pixels clipped, against
-2.84% on the clean chain). Reporting the luma column as if subsampling caused it would be wrong.</p>
+floor of 0.987 — so 92% of the luma error is the encoder's own quantisation and the remaining 8% is
+the chain. The honest reading is that these 0.67 dB are not attributable to the chroma pass at all;
+the small residual comes from the encoder re-allocating bits around the extra clipping (3.83% of
+pixels clipped, against 2.84% on the clean chain). Reporting the luma column as if subsampling caused
+it would be wrong.</p>
 
 <h3>The penalty grows with the scale factor</h3>
 
@@ -253,7 +256,7 @@ image is easier to subsample — but the ratio climbs from 1.59× to 1.72×. The
 the scales where people upscale furthest. It is not a dramatic effect, and at 4× the difference is
 0.32 RMSE units on a 0–255 scale, which nobody will see on a photograph. Where it will show is a
 saturated edge, and that is measurable: the 99th-percentile chroma error on the top-5%-gradient mask
-went from a median 4.0 (4:4:4) to 6.0 (encode only), 11.0 (source only) and 17.0 (both) — 4.25× the
+went from a median 4.0 (4:4:4) to 6.0 (encode only), 11.3 (source only) and 13.5 (both) — 3.4× the
 clean chain at the pixels where chroma error is most visible.</p>
 
 <h3>A fourth negative result: the 20% saving does not depend on chroma detail</h3>
@@ -291,10 +294,13 @@ chroma resolution starts to win.</p>
 <h3>Reproducing it</h3>
 
 <p>The whole measurement is one script, and it hides one trap that produced a wrong number on the first
-run. Pillow's <code>YCbCr</code> mode keeps Cb and Cr as signed values around zero, so if you hand a
-raw Cb plane to <code>Image.fromarray()</code> as <code>'L'</code> every negative sample wraps to 255
-and the box filter averages garbage — the first pass reported a chroma RMSE of 8.4 and a nonsense
-+1218% before the cause was found. Chroma has to be offset by 128, exactly the way JPEG stores it:</p>
+run. Pillow's <code>YCbCr</code> mode keeps Cb and Cr as signed values around zero — on this frame Cb
+runs −75.1 to 49.2 and 63.7% of its samples are negative. Clip a signed plane to 0 before sampling it
+and every one of those samples becomes a flat zero: the box filter then averages a plane with its
+entire lower half deleted, and the measured chroma RMSE comes out 8.38. Cast the same negative floats
+straight to <code>uint8</code> and they wrap to 255, which is worse — RMSE 198.34, a number so absurd
+it is the only reason the bug was caught at all. Chroma has to be offset by 128 before it goes near an
+8-bit buffer, exactly the way JPEG stores it, which brings the same measurement to 1.07:</p>
 
 <pre><code>import io, numpy as np
 from PIL import Image
