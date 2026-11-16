@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Output Format After Upscaling: What JPEG, WebP and AVIF Do to the Detail You Just Bought</title>
+<meta name="description" content="At a matched 400 KB, AVIF scored 46.44 dB against JPEG's 43.15 on the same upscaled frame. Every encoder added high-frequency energy rather than removing it, and JPEG reached a byte-identical fixed point after 29 re-encodes while AVIF never did.">
+<link rel="canonical" href="https://celticgemini001.github.io/upgolab-output-format-after-upscale/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Output Format After Upscaling: What JPEG, WebP and AVIF Do to the Detail You Just Bought">
+<meta property="og:description" content="Three encoders, one upscaled frame, matched file size. AVIF bought 3.28 dB. All three added high-frequency energy instead of losing it, most of it in flat regions.">
+<script type="application/ld+json">
+{"@type":"Article",
+ "@context":"https://schema.org",
+ "headline":"Output Format After Upscaling: What JPEG, WebP and AVIF Do to the Detail You Just Bought",
+ "author":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
+ "publisher":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
+ "datePublished":"2026-11-16",
+ "dateModified":"2026-11-16",
+ "mainEntityOfPage":"https://celticgemini001.github.io/upgolab-output-format-after-upscale/"}
+</script>
+<style>
+:root{--ink:#16181d;--mut:#5b6270;--line:#e2e5ea;--acc:#0a58ca}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);font:17px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:46rem;margin:0 auto;padding:3rem 1.25rem 5rem}
+h1{font-size:2rem;line-height:1.22;margin:0 0 .5rem;letter-spacing:-.02em}
+h2{font-size:1.33rem;margin:2.5rem 0 .7rem}
+h3{font-size:1.06rem;margin:1.8rem 0 .5rem}
+p,li{color:#2b3038}ul,ol{padding-left:1.3rem}li{margin:.4rem 0}
+a{color:var(--acc)}
+.lede{font-size:1.14rem;color:var(--mut);margin:0 0 1.6rem}
+.meta{font-size:.88rem;color:var(--mut);border-bottom:1px solid var(--line);padding-bottom:1rem;margin-bottom:2rem}
+table{width:100%;border-collapse:collapse;margin:1.4rem 0;font-size:.94rem}
+th,td{text-align:left;padding:.6rem .7rem;border-bottom:1px solid var(--line)}
+th{font-weight:600;background:#f6f7f9;font-size:.86rem;text-transform:uppercase;letter-spacing:.03em;color:var(--mut)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.callout{border-left:3px solid var(--acc);background:#f5f8fd;padding:.9rem 1.1rem;margin:1.6rem 0;border-radius:0 6px 6px 0}
+.callout p{margin:.3rem 0}
+.callout.warn{border-left-color:#b45309;background:#fef7ec}
+pre{background:#f7f8fa;border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto;font-size:.86rem}
+code{font-size:.9em}
+footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-size:.9rem;color:var(--mut)}
+.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
+.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
+ color:#5b6270;margin:0 0 .6rem}
+.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
+.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
+.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
+.sisternav a:hover{border-bottom-color:#0a58ca}
+</style>
+</head>
+<body>
+<main>
+<article>
+<h1>Output Format After Upscaling: What JPEG, WebP and AVIF Do to the Detail You Just Bought</h1>
+
+<p class="lede">The last step of every upscaling job is the one nobody measures. You spent the compute
+to reconstruct detail, then hand the result to a lossy encoder and let it decide which of those
+details were worth keeping. I took one upscaled frame, encoded it three ways at a <em>matched file
+size</em>, and measured what came back. AVIF bought 3.28 dB over JPEG at the same 400 KB. But the
+more useful finding is that all three encoders <strong>added</strong> high-frequency energy rather
+than removing it, which means the intuitive metric — "how much detail survived" — is measuring the
+wrong sign.</p>
+
+<p class="meta">Measured with numpy 1.26.4 and Pillow 12.2.0 · source is one real photograph at
+1080×1620, upscaled 2× with Lanczos to 2160×3240 · the reference for every error figure is the
+upscaled RGB array itself, so all numbers isolate encoder loss and exclude resampler loss · all
+statistics computed on uint8-decoded arrays, never on screenshots · every figure reproducible from
+the snippet at the end</p>
+
+<h2>The setup: matched size, not matched quality</h2>
+
+<p>Comparing encoders at "quality 80" is meaningless, because the three quality scales are not the
+same scale. Pillow's <code>quality=80</code> for JPEG, WebP and AVIF produce files that differ by a
+factor of two in size on identical pixels. What a person actually chooses is a <strong>file size
+budget</strong> — a hero image that must stay under half a megabyte, a thumbnail under 60 KB — and
+then asks which encoder uses that budget best.</p>
+
+<p>So the comparison below searches each encoder's quality scale for the setting that lands closest
+to 400,000 bytes, then measures PSNR against the pre-encode array. The three files that competed
+are within 6% of each other in size, which is as matched as an integer quality knob allows.</p>
+
+<table>
+<thead><tr><th>Encoder</th><th>Setting</th><th>Bytes</th><th>PSNR vs source</th><th>HF energy vs source</th></tr></thead>
+<tbody>
+<tr><td>JPEG</td><td class="num">q68</td><td class="num">404,460</td><td class="num">43.153 dB</td><td class="num">116.4%</td></tr>
+<tr><td>WebP</td><td class="num">q90</td><td class="num">381,016</td><td class="num">45.176 dB</td><td class="num">106.8%</td></tr>
+<tr><td>AVIF</td><td class="num">q86</td><td class="num">403,527</td><td class="num"><strong>46.437 dB</strong></td><td class="num">104.4%</td></tr>
+</tbody>
+</table>
+
+<p>AVIF is 3.28 dB ahead of JPEG and 1.26 dB ahead of WebP at the same budget. That is a real and
+reproducible margin — but 3.28 dB on a frame that already sits above 43 dB is not a visible
+difference at normal viewing distance. It matters when the file will be re-encoded downstream, which
+is the case this whole article keeps returning to.</p>
+
+<h2>A negative result: every encoder added detail instead of losing it</h2>
+
+<p>The column that surprised me is the last one. I expected all three to fall below 100% — lossy
+encoding discards, so high-frequency energy should drop. It did not. JPEG came back at 116% of the
+source's high-frequency energy, WebP at 107%, AVIF at 104%.</p>
+
+<p>The measurement is mean absolute Laplacian on luma. A value above 100% means the decoded image has
+<em>steeper local transitions</em> than the array that was handed to the encoder. Nothing was added
+to the picture; the encoder manufactured edges. JPEG does it most because 8×8 block quantisation
+creates discontinuities at block borders, and a discontinuity is by definition high-frequency — it
+shows up as a spike in any Laplacian-type measure regardless of whether a human can see it.</p>
+
+<div class="callout warn">
+<p><strong>Consequence for measurement:</strong> "detail retained" cannot be computed as a ratio of
+high-frequency energy after a lossy step. The ratio exceeds one, so it cannot be interpreted as a
+retention figure at all. Blocking artifacts are indistinguishable from detail under this metric.
+This is the same trap I hit in the JPEG-blocking piece: the block edge keeps its contrast and gains
+area, so a gradient-energy measure reports an increase where the eye reports a defect.</p>
+</div>
+
+<h2>Where the invented detail lives</h2>
+
+<p>If the extra high-frequency energy were spread evenly, it would be a mild curiosity. It is not
+spread evenly. I split the frame into the flattest quartile of gradient magnitude (24.9% of pixels)
+and the top decile (sharp edges), then measured the same Laplacian statistic in each region against
+the same regions of the source:</p>
+
+<table>
+<thead><tr><th>Encoder</th><th>Flat-quartile HF vs source</th><th>Edge-decile HF vs source</th></tr></thead>
+<tbody>
+<tr><td>JPEG q70</td><td class="num">276.6%</td><td class="num">106.4%</td></tr>
+<tr><td>JPEG q95</td><td class="num">183.5%</td><td class="num">101.8%</td></tr>
+<tr><td>WebP q80</td><td class="num">232.0%</td><td class="num">102.9%</td></tr>
+<tr><td>AVIF q80</td><td class="num">232.1%</td><td class="num">102.1%</td></tr>
+</tbody>
+</table>
+
+<p>In the flat regions the encoders roughly double or triple the local variation. On real edges they
+are within a few percent of the source. That is exactly backwards from what a person wants: the
+places that were smooth and should stay smooth are where the noise lands, and the places that
+already had contrast are preserved almost perfectly.</p>
+
+<p>It also explains why raising JPEG quality helps so much in the flat column — 276.6% at q70 falls
+to 183.5% at q95 — while the edge column barely moves. Blocking is a flat-region phenomenon. If your
+frame is mostly sky, gradient, or studio backdrop, JPEG quality is the parameter that matters, and
+it matters for a reason that has nothing to do with detail retention.</p>
+
+<h2>Chroma subsampling: what 18.6% of the file actually costs</h2>
+
+<p>JPEG at q90 with 4:4:4 chroma, then the same q90 in 4:2:2 and 4:2:0. Everything else held fixed:</p>
+
+<table>
+<thead><tr><th>Subsampling</th><th>Bytes</th><th>PSNR</th><th>Chroma RMSE (Cb/Cr only)</th></tr></thead>
+<tbody>
+<tr><td>4:4:4 (s=0)</td><td class="num">899,642</td><td class="num">49.030 dB</td><td class="num">0.566</td></tr>
+<tr><td>4:2:2 (s=1)</td><td class="num">795,568</td><td class="num">48.245 dB</td><td class="num">0.645</td></tr>
+<tr><td>4:2:0 (s=2)</td><td class="num">732,069</td><td class="num">47.600 dB</td><td class="num">0.711</td></tr>
+</tbody>
+</table>
+
+<p>4:2:0 removes 18.6% of the bytes and raises chroma error by 25.6%. The PSNR cost looks small —
+1.43 dB — but PSNR is dominated by luma, which subsampling does not touch. The isolated chroma RMSE
+is the honest number, and it rises by a quarter. On a saturated colour boundary — red signage,
+coloured gel lighting, a bright product on a coloured backdrop — that quarter is where the coloured
+fringe along the edge comes from.</p>
+
+<p>This is worth connecting to the upscale itself: subsampling throws away chroma resolution
+<em>after</em> you paid to reconstruct it. If the source was already 4:2:0, upscaling reconstructed
+chroma detail that never existed and 4:2:0 output discards it again for an 18.6% saving. If the
+source was 4:4:4 or synthetic, that saving is a real loss.</p>
+
+<h2>Generation loss: JPEG has a fixed point, the modern codecs do not</h2>
+
+<p>Files get re-encoded. A CMS resizes, a CDN recompresses, a client opens and saves. So I re-encoded
+the <em>same</em> frame repeatedly at a fixed setting, feeding each output back in, and watched for
+two things: how fast quality fell, and whether the process ever stabilised.</p>
+
+<table>
+<thead><tr><th>Encoder</th><th>PSNR gen 1</th><th>Stabilised?</th><th>Generations to fixed point</th><th>Bytes gen 1 → last</th><th>PSNR at last</th></tr></thead>
+<tbody>
+<tr><td>JPEG q85</td><td class="num">46.379</td><td><strong>yes</strong></td><td class="num">29</td><td class="num">591,176 → 591,595</td><td class="num">42.657 dB</td></tr>
+<tr><td>WebP q85</td><td class="num">43.768</td><td>no (40 gen)</td><td class="num">never</td><td class="num">280,894 → 220,036</td><td class="num">32.880 dB</td></tr>
+<tr><td>AVIF q80</td><td class="num">45.949</td><td>no (20 gen)</td><td class="num">never</td><td class="num">339,423 → 347,689</td><td class="num">32.278 dB</td></tr>
+</tbody>
+</table>
+
+<p>JPEG reaches a byte-identical output at generation 29 and then stops changing forever. That is a
+property of DCT quantisation with a fixed table: once the coefficients are already snapped to the
+quantisation grid, re-quantising them is the identity. The cost is 3.72 dB from generation 1 to the
+fixed point, and after that the file is free to copy around.</p>
+
+<p>WebP and AVIF show no such floor. Over 40 and 20 generations respectively they lost 10.9 dB and
+13.7 dB with no sign of converging, and WebP's file got <em>smaller</em> every generation — 280,894
+down to 220,036 bytes — while AVIF's got slightly larger. Neither behaviour is a fixed point; both
+are still drifting when the loop ends.</p>
+
+<div class="callout">
+<p><strong>Practical reading:</strong> "JPEG is bad because it is generational" and "modern codecs are
+better" are both partly wrong. JPEG degrades faster per generation but <em>terminates</em>. The
+modern codecs degrade more slowly at first and then never stop. For a file that will be re-encoded a
+handful of times, AVIF wins. For a file that will be re-encoded an unknown number of times, the
+guarantee matters more than the first-generation score.</p>
+</div>
+
+<h2>The format gap is not constant — it grows with pixel count</h2>
+
+<p>Same photograph, encoded at its native 1080×1620 and at the 2× upscale, same settings per
+encoder:</p>
+
+<table>
+<thead><tr><th>Encoder</th><th>1× (1080×1620)</th><th>2× (2160×3240)</th><th>Byte ratio</th></tr></thead>
+<tbody>
+<tr><td>JPEG q85</td><td class="num">230,956</td><td class="num">591,176</td><td class="num">2.56×</td></tr>
+<tr><td>WebP q85</td><td class="num">131,668</td><td class="num">280,894</td><td class="num">2.13×</td></tr>
+<tr><td>AVIF q80</td><td class="num">160,909</td><td class="num">339,423</td><td class="num">2.11×</td></tr>
+</tbody>
+</table>
+
+<p>Pixel count went up 4×. JPEG's file grew 2.56×, WebP 2.13×, AVIF 2.11×. JPEG is the least
+efficient at absorbing extra pixels, so the AVIF-over-JPEG size advantage widens from 1.44× at native
+resolution to 1.74× at the upscale. This is the argument for choosing the output format <em>after</em>
+deciding to upscale, not before: the bigger the output, the more the format choice is worth.</p>
+
+<p>It also means a size budget set at 1× does not survive the upscale. A 231 KB JPEG at native size
+becomes 591 KB at 2× — 2.56 times the budget for 4 times the pixels. Switching that output to AVIF
+recovers 251,753 bytes, 42.6% of the 2× file, without touching the encoder quality knob.</p>
+
+<h2>A second negative result: measured after a downscale, the penalty halves</h2>
+
+<p>Most content is not viewed at full resolution. A 4K master becomes a 1200-pixel-wide web image.
+So I re-ran the comparison at matched size and then downscaled both the reference and the decoded
+file by 2× and 4× before computing PSNR:</p>
+
+<table>
+<thead><tr><th>Encoder</th><th>Full frame</th><th>After 2× downscale</th><th>After 4× downscale</th></tr></thead>
+<tbody>
+<tr><td>JPEG q68</td><td class="num">43.153 dB</td><td class="num">44.368 dB</td><td class="num">45.924 dB</td></tr>
+<tr><td>WebP q90</td><td class="num">45.176 dB</td><td class="num">46.177 dB</td><td class="num">47.978 dB</td></tr>
+<tr><td>AVIF q86</td><td class="num">46.437 dB</td><td class="num">47.128 dB</td><td class="num">48.371 dB</td></tr>
+<tr><td><em>AVIF − JPEG</em></td><td class="num"><strong>3.284</strong></td><td class="num">2.760</td><td class="num">2.447</td></tr>
+</tbody>
+</table>
+
+<p>Two things happen at once, and they point in opposite directions. Every encoder's score
+<em>rises</em> when measured after a downscale — JPEG gains 1.22 dB at 2× and 2.77 dB at 4× — because
+downscaling averages away exactly the high-frequency error the encoder introduced in flat regions.
+But the <em>gap</em> between AVIF and JPEG narrows, from 3.28 dB to 2.45 dB, because AVIF's advantage
+was concentrated in that same high-frequency band.</p>
+
+<p>So benchmarking encoders on full-resolution PSNR overstates their visible difference for
+downscaled delivery, and benchmarking them after a downscale understates it for full-resolution
+delivery. Which one is right depends entirely on where the file ends up, and any single number
+presented as "the" encoder ranking is answering a question that was not asked.</p>
+
+<h2>When to skip the choice entirely: lossless</h2>
+
+<p>If the file still has an edit ahead of it — a crop, a composite, another resize — every lossy
+number above is the wrong tool. On this frame:</p>
+
+<table>
+<thead><tr><th>Format</th><th>Bytes</th><th>PSNR</th></tr></thead>
+<tbody>
+<tr><td>PNG (optimize=True)</td><td class="num">4,555,198</td><td>lossless</td></tr>
+<tr><td>WebP lossless (method 6)</td><td class="num">3,276,760</td><td>lossless</td></tr>
+<tr><td>JPEG q85 (for scale)</td><td class="num">591,176</td><td class="num">46.379 dB</td></tr>
+</tbody>
+</table>
+
+<p>WebP lossless is 71.9% of the PNG size on a photographic frame, which is a legitimate saving with
+zero quality argument attached. But both are about 7.7× the JPEG size. Lossless is for intermediates,
+not for delivery, and the only reason to mention it in a page about output format is that the
+intermediate choice is where generation loss is either avoided or invited in.</p>
+
+<h2>The decision, reduced to what was measured</h2>
+
+<ul>
+<li><strong>Fixed byte budget, one encode, viewed at full resolution:</strong> AVIF, by 3.28 dB over
+JPEG. If AVIF is not an option in the pipeline, WebP q90 recovers 2.02 dB of that gap.</li>
+<li><strong>Mostly flat frame</strong> (sky, backdrop, gradient): the flat-region artifact column is
+the one to watch; JPEG q70 puts 2.77× the source's local variation into smooth areas. Raise quality
+before changing format, because that column responds to quality and the edge column does not.</li>
+<li><strong>Will be re-encoded an unknown number of times:</strong> prefer the codec with a fixed
+point. JPEG terminates at generation 29; WebP and AVIF were still drifting at 40 and 20.</li>
+<li><strong>Delivered downscaled:</strong> the size advantage of the modern codecs survives, the
+quality advantage halves. Choose on bytes, not decibels.</li>
+<li><strong>Another edit ahead:</strong> WebP lossless at 71.9% of PNG, and neither one is the
+delivery file.</li>
+</ul>
+
+<p>None of this changes the fact that the frame above 43 dB is already past the point where a viewer
+at normal distance can see the difference. The format choice is a size decision with a small quality
+side effect, and treating it as a quality decision with a size side effect is how people end up
+spending 591 KB on a file that would have looked identical at 403 KB.</p>
+
+<h3>Reproducing it</h3>
+
+<pre><code>import io, numpy as np
+from PIL import Image
+
+SRC = Image.open('photo.jpg').convert('RGB')
+UP  = SRC.resize((SRC.width*2, SRC.height*2), Image.LANCZOS)
+A   = np.asarray(UP)                       # reference: pre-encode array
+
+def rt(fmt, **kw):                         # round-trip through one encoder
+    b = io.BytesIO(); Image.fromarray(A, 'RGB').save(b, fmt, **kw)
+    return len(b.getvalue()), np.asarray(Image.open(io.BytesIO(b.getvalue())).convert('RGB'))
+
+def psnr(a, b):
+    a = a.astype(np.float64); b = b.astype(np.float64)
+    m = ((a-b)**2).mean()
+    return 99.0 if m == 0 else 10*np.log10(255.0**2/m)
+
+def hf(a):                                 # mean |Laplacian| on luma
+    y = 0.2126*a[...,0] + 0.7152*a[...,1] + 0.0722*a[...,2]
+    return float(np.abs(4*y[1:-1,1:-1] - y[:-2,1:-1] - y[2:,1:-1]
+                        - y[1:-1,:-2] - y[1:-1,2:]).mean())
+
+# 1. matched-size search
+for fmt, key, rng in [('JPEG','quality',range(50,100,2)),
+                      ('WEBP','quality',range(50,100,2)),
+                      ('AVIF','quality',range(20,95,2))]:
+    best = min(rng, key=lambda v: abs(rt(fmt, **{key: v})[0] - 400_000))
+    n, rec = rt(fmt, **{key: best})
+    print(fmt, best, n, round(psnr(A, rec), 3), round(100*hf(rec)/hf(A), 1))
+
+# 2. generation loss -> does it reach a byte-identical fixed point?
+for fmt, kw, limit in [('JPEG', {'quality': 85}, 40),
+                       ('WEBP', {'quality': 85}, 40),
+                       ('AVIF', {'quality': 80}, 20)]:
+    cur = A.copy(); prev = None
+    for g in range(1, limit+1):
+        b = io.BytesIO(); Image.fromarray(cur, 'RGB').save(b, fmt, **kw)
+        data = b.getvalue()
+        cur = np.asarray(Image.open(io.BytesIO(data)).convert('RGB'))
+        if data == prev:
+            print(fmt, 'fixed point at gen', g, len(data), round(psnr(A, cur), 3)); break
+        prev = data
+    else:
+        print(fmt, 'no fixed point in', limit, 'generations', round(psnr(A, cur), 3))</code></pre>
+
+<p>Output on this machine, in order: <code>JPEG 68 404460 43.153 116.4 · WEBP 90 381016 45.176
+106.8 · AVIF 86 403527 46.437 104.4</code>, then <code>JPEG fixed point at gen 29 591595 42.657</code>,
+<code>WEBP no fixed point in 40 generations 32.88</code>, <code>AVIF no fixed point in 20 generations
+32.278</code>. One caveat worth stating: the fixed-point generation count depends on the quality
+setting and the frame — q85 on this source took 29 — so treat "29" as an order of magnitude, not a
+constant. The <em>existence</em> of the fixed point is the reusable finding, and that one is a property
+of DCT quantisation rather than of this photograph.</p>
+
+<footer>
+<p>Published by UpgoLAB — sharpening and upscaling for photos and short video in the browser, where
+the output format is one of the few settings that costs nothing to change: try the
+<a href="https://upgolab.com">browser upscaler and pick the export format yourself</a>.</p>
+<p>Measured with numpy 1.26.4 and Pillow 12.2.0 on one real photograph at 1080×1620 upscaled 2× to
+2160×3240; 8 tables, 6 experiments, 2 negative results reported as measured (all encoders add
+high-frequency energy; measuring after a downscale halves the format penalty) and no value adjusted
+after the run. The reference for every PSNR is the pre-encode array, never a re-decoded file.</p>
+
+<style>
+.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
+.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
+ color:#5b6270;margin:0 0 .6rem}
+.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
+.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
+.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
+.sisternav a:hover{border-bottom-color:#0a58ca}
+</style>
+
+<nav class="sisternav" aria-label="More measured upscaling guides">
+<p>More measured guides</p>
+<ul>
+  <li><a href="https://celticgemini001.github.io/upgolab-ai-upscaler-guide/">What upscaling recovers vs invents</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-video-upscaling-limits/">Why video isn't image upscaling</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-upscale-product-photos/">Product shot vs face</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-2k-vs-4k-decision/">2K vs 4K bits-per-pixel</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-upscale-anime-illustration/">Line art and ink coverage</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-old-footage-restoration/">Old footage restoration</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-screen-recording-4k/">Screen recording to 4K</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-thumbnail-4k-master/">4K thumbnail master</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-remove-background-and-upscale/">Cutout and upscale</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-anisotropic-upscale/">Anisotropic / one-axis scale</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-chroma-subsampling/">Chroma subsampling 4:2:0</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-gamma-vs-linear-light/">Gamma vs linear light</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-bit-depth-banding/">8-bit vs 10-bit banding</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-jpeg-blocking-upscale/">JPEG blocking under upscaling</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-upscale-vs-reshoot/">Re-shoot vs upscale break-even</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-what-nofollow-means/">What rel=nofollow actually does</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-fractional-upscale-factors/">Fractional upscale factors (1.333x)</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-tiled-upscale-seams/">Tiled upscaling seams</a></li>
+  <li><a href="https://celticgemini001.github.io/upgolab-tools/">All guides (index)</a></li>
+</ul>
+</nav>
+</footer>
+</article>
+</main>
+</body>
+</html>
